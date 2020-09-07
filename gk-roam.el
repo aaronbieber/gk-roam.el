@@ -24,7 +24,7 @@
 ;; along with this program; if not, write to the Free Software
 ;; Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
 
-;;; Commentary: 
+;;; Commentary:
 
 ;; Gk-roam is a light-weight roam repica, built on top of emacs OrgMode.
 
@@ -217,6 +217,17 @@
 	       (save-buffer))))))))
   (message "%s reference updated" (file-name-nondirectory file)))
 
+(defun gk-roam--insert-link-always (title)
+  "Insert a link to file TITLE, creating it if necessary."
+  (let ((file-exist-p (gk-roam--get-file title)))
+    (if (not file-exist-p)
+        (gk-roam-new title))
+    (gk-roam-insert title)
+    (save-buffer)
+    (if (not file-exist-p)
+        (gk-roam-find title))
+    (gk-roam-update-reference (gk-roam--get-file title))))
+
 ;; -----------------------------------------------------
 ;;;###autoload
 (defun gk-roam-new (title &optional tags)
@@ -233,6 +244,14 @@
       (goto-char beg)
       (save-buffer))
     file))
+
+;;;###autoload
+(defun gk-roam-insert-link-dwim ()
+  "Insert a link to an existing file or create a new one."
+  (interactive)
+  (let ((title (completing-read "New title or choose existing: "
+                                (gk-roam--all-titles) nil nil)))
+    (gk-roam--insert-link-always title)))
 
 ;; ;;;###autoload
 (defun gk-roam-find (&optional title tags)
@@ -252,27 +271,13 @@
 (defun gk-roam-new-at-point ()
   "Insert a file link and create a new file according to text at point."
   (interactive)
-  (if (string= (file-name-directory (buffer-file-name))
-	       (expand-file-name gk-roam-root-dir))
-      (let* ((title (thing-at-point 'word))
-	     (file-exist-p (gk-roam--get-file title))
-	     (file (or file-exist-p
-		       (gk-roam--gen-file title)))
-	     date)
-	(if file-exist-p
-	    (progn
-	      (backward-word)
-	      (kill-word 1)
-	      (gk-roam-insert title)
-	      (save-buffer))
-	  (gk-roam-new title)
-	  (backward-word)
-	  (kill-word 1)
-	  (gk-roam-insert title)
-	  (save-buffer)
-	  (gk-roam-find title))	
-	(gk-roam-update-reference (gk-roam--get-file title)))
-    (message "Not in the gk-roam directory!")))
+  (if (not (string= (file-name-directory (buffer-file-name))
+                    (expand-file-name gk-roam-root-dir)))
+      (user-error "Current file is not in the gk-roam directory")
+    (let ((title (thing-at-point 'word)))
+      (backward-word)
+      (kill-word 1)
+      (gk-roam--insert-link-always title))))
 
 ;;;###autoload
 (defun gk-roam-new-from-region ()
