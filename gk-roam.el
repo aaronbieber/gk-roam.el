@@ -32,6 +32,13 @@
 
 (require 'simple-httpd)
 
+(defgroup gk-roam '() "GK Roam customization options.")
+
+(defcustom gk-roam-require-tags t
+  "Whether tag entry is required to create a new file."
+  :group 'gk-roam
+  :type 'boolean)
+
 (defvar gk-roam-root-dir "/Users/kinney/gk-roam/org/"
   "Gk-roam's root directory, with org files in it.")
 
@@ -40,6 +47,10 @@
 
 (defvar gk-roam-pub-css "<link rel=\"stylesheet\" href=\"https://gongzhitaao.org/orgcss/org.css\">"
   "Gk-roam publish css link.")
+
+(defvar gk-roam-ref-heading-pattern
+  (rx line-start "* Roam References (" (+ digit) ")\n")
+  "A pattern for identifying the file references heading.")
 
 (setq org-link-frame-setup
       '((vm . vm-visit-folder-other-frame)
@@ -107,7 +118,7 @@
   ;; (gk-roam-delete-reference file)
   (let* ((name (generate-new-buffer-name (format " *%s*" process)))
          (process (start-process
-                   name name "rg" "-Fn" "--heading"
+                   name name "rg" "-SFn" "--heading"
 		   (gk-roam--format-link file)
 		   (expand-file-name (file-name-directory file)) ;; must be absolute path.
 		   "-g" "!index.org*"))
@@ -141,11 +152,23 @@
 (defun gk-roam--format-backlink (line file)
   "Format gk-roam backlink of specific LINE in FILE."
   (let* ((filename (file-name-nondirectory file))
-	 (heading (gk-roam-heading-of-line line file))
-	 (text (gk-roam--get-title filename)))
+         (heading (gk-roam-heading-of-line line file))
+         (text (gk-roam--get-title filename)))
     (if (null heading)
-	(format "[[file:%s][%s/top]]" filename text)
-      (format "[[file:%s::*%s][%s/%s]]" filename heading text heading))))
+        (format "[[file:%s][%s/top]]" filename text)
+      (let* ((escaped-heading (if (string-match (rx "[[" (group (+ (not "]"))) "][" (group (+ (not "]"))) "]]") heading)
+                                  (replace-match
+                                   (concat
+                                    "\\\\[\\\\["
+                                    (match-string 1 heading)
+                                    "\\\\]\\\\["
+                                    (match-string 2 heading)
+                                    "\\\\]\\\\]") nil nil heading)
+                                heading))
+             (link-text (if (string-match (rx "[[" (group (+ (not "]"))) "][" (group (+ (not "]"))) "]]") heading)
+                            (replace-match (match-string 2 heading) nil nil heading)
+                          heading)))
+        (format "[[file:%s::*%s][%s/%s]]" filename escaped-heading text link-text)))))
 
 (defun gk-roam--process-reference (text file)
   "Remove the link of current file in reference's text."
@@ -177,44 +200,47 @@
    file "gk-roam-rg"
    (lambda (results)
      (let* ((file-buf (or (get-file-buffer file)
-			  (find-file-noselect file nil nil))))
+                          (find-file-noselect file nil nil))))
        (with-current-buffer file-buf
-	 (save-excursion
-	   (goto-char (point-min))
-	   (unless (re-search-forward "-----\n" nil t)
-	     (goto-char (point-max))
-	     (insert "\n-----\n"))
-	   (delete-region (point) (point-max))
-	   (let ((num 0))
-	     (if (null results)
-		 (progn
-		   (insert "/*No Linked Reference*/")
-		   (save-buffer))
-	       (dolist (res results)
-		 (let* ((res-list (split-string res "\n" t "[ \n]+"))
-			(res-file (car res-list))
-			line text)
-		   (pop res-list) ;; return first elem!
-		   (setq num (+ num (length res-list)))
-		   (dolist (item res-list)
-		     (setq line (when (string-match "[0-9]+" item)
-				  (match-string 0 item)))
-		     (setq text
-			   (gk-roam--process-reference
-			    (string-trim item
-					 (when (string-match "[0-9]+: *" item)
-					   (match-string 0 item))
-					 nil)
-			    file))
-		     (insert
-		      (concat "\n» "
-			      (gk-roam--format-backlink line res-file)
-			      "\\\\\n" text))
-		     (insert "\n"))))
-	       (goto-char (point-min))
-	       (re-search-forward "-----\n" nil t)
-	       (insert (format "/*%d Linked Reference:*/\n" num))
-	       (save-buffer))))))))
+         (save-excursion
+           (goto-char (point-min))
+           (when (re-search-forward gk-roam-ref-heading-pattern nil t)
+             (goto-char (match-beginning 0))
+             (delete-region (point) (point-max)))
+           (goto-char (point-max))
+           (insert "* Roam References (0)\n\n")
+           ;;(delete-region (point) (point-max))
+           (let ((num 0))
+             (if (null results)
+                 (save-buffer))
+             (dolist (res results)
+               (let* ((res-list (split-string res "\n" t "[ \n]+"))
+                      (res-file (car res-list))
+                      line text)
+                 (pop res-list) ;; return first elem!
+                 (setq num (+ num (length res-list)))
+                 (dolist (item res-list)
+                   (setq line (when (string-match "[0-9]+" item)
+                                (match-string 0 item)))
+                   (setq text
+                         (gk-roam--process-reference
+                          (string-trim item
+                                       (when (string-match "[0-9]+: *" item)
+                                         (match-string 0 item))
+                                       nil)
+                          file))
+                   (insert
+                    (concat "\n** "
+                            (gk-roam--format-backlink line res-file)
+                            "\n" text))
+                   (insert "\n"))))
+             (goto-char (point-min))
+             (if-let ((line-end (re-search-forward gk-roam-ref-heading-pattern nil t))
+                      (num-start (search-backward "(")))
+                 (progn
+                   (delete-char (- line-end num-start 1))
+                   (insert (format "(%s)" num))))
+             (save-buffer)))))))
   (message "%s reference updated" (file-name-nondirectory file)))
 
 (defun gk-roam--insert-link-always (title)
@@ -232,7 +258,9 @@
 ;;;###autoload
 (defun gk-roam-new (title &optional tags)
   "Just create a new gk-roam file."
-  (let* ((tags (if tags tags (completing-read "New tags: " nil nil nil)))
+  (let* ((tags (if tags tags
+                 (if gk-roam-require-tags
+                     (completing-read "New tags: " nil nil nil))))
 	 (file (gk-roam--gen-file title))
 	 (file-buf (find-file-noselect file))
 	 beg)
@@ -258,7 +286,7 @@
   "Create a new gk-roam file or open an exist one."
   (interactive)
   (let* ((title (if title title
-		  (completing-read "New title or open an exist one: "
+		  (completing-read "Enter a new title or select file: "
 				   (gk-roam--all-titles) nil nil)))
 	 (file-exist-p (gk-roam--get-file title))
 	 tags)
