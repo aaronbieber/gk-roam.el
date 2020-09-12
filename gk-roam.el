@@ -208,8 +208,7 @@
              (goto-char (match-beginning 0))
              (delete-region (point) (point-max)))
            (goto-char (point-max))
-           (insert "* Roam References (0)\n\n")
-           ;;(delete-region (point) (point-max))
+           (insert "* Roam References (0)\n")
            (let ((num 0))
              (if (null results)
                  (save-buffer))
@@ -266,9 +265,13 @@
 	 beg)
     (with-current-buffer file-buf
       (insert
-       (format "#+TITLE: %s\n#+DATE: %s\n#+OPTIONS: toc:nil H:2 num:0\n#+TAGS: %s\n» [[file:index.org][ /Gk-Roam/ ]]\n\n" title (format-time-string "%Y-%m-%d") tags))
+       (format (concat "#+TITLE: %s\n"
+                       "#+DATE: %s\n"
+                       "#+OPTIONS: toc:nil H:2 num:0\n"
+                       "#+TAGS: %s\n"
+                       "» [[file:index.org][ /Gk-Roam/ ]]\n\n") title (format-time-string "%Y-%m-%d") tags))
       (setq beg (point))
-      (insert "\n\n-----\n/*No Linked Reference*/")
+      (insert "\n\n* Roam References (0)\n")
       (goto-char beg)
       (save-buffer))
     file))
@@ -292,7 +295,7 @@
 	 tags)
     (if file-exist-p
 	(find-file file-exist-p)
-      (setq tags (completing-read "New tags: " nil nil nil))
+      (setq tags (and gk-roam-require-tags (completing-read "New tags: " nil nil nil)))
       (find-file (gk-roam-new title tags)))))
 
 ;;;###autoload
